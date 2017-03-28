@@ -16,7 +16,6 @@
 
 require_once './Github.php';
 require_once './TicketMigration.php';
-require_once 'XML/RPC2/Client.php';
 
 /**
  * Iterator of all ticket migrations.
@@ -27,6 +26,10 @@ final class Migrations implements \Iterator {
      * @var \XML_RPC2_Client
      */
     private $_trac;
+    /**
+     * Trac legacy URL
+     */
+    private $_trac_url;
     /**
      * Github client.
      * @var Github
@@ -59,6 +62,13 @@ final class Migrations implements \Iterator {
                 'encoding' => 'utf-8',
             )
         );
+
+        $trac_url = parse_url($opts['t']);
+        $this->_trac_url = $trac_url['scheme']
+            .'://'.$trac_url['host']
+            .(empty($trac_url['port']) ? '' : ':'.$trac_url['port'])
+            .preg_replace('%(/login)?/rpc$%', '', $trac_url['path']);
+
         log('Trac XML RPC client configured at ' . $opts['t']);
         if (!isset($opts['u'])) {
             throw new \Exception('GitHub user name not defined by -u=...');
@@ -74,6 +84,9 @@ final class Migrations implements \Iterator {
         } else {
             $this->_github = new Github($opts['u'], $opts['r'], $opts['p'], $opts['o']);
         }
+        if (isset($opts['i'])) {
+            $this->_numbers = array_map('intval', explode(',', $opts['i']));
+        }
 
         $existing = $this->_github->issues();
         if (!empty($existing)) {
@@ -85,9 +98,11 @@ final class Migrations implements \Iterator {
      */
     public function rewind() {
         $this->_position = 0;
-        $this->_numbers = array();
-        log('Loading Trac ticket numbers... (may take some time)');
-        $this->_numbers = $this->_trac->query("max=0&order=id");
+        if(empty($this->_numbers)) {
+            $this->_numbers = array();
+            log('Loading Trac ticket numbers... (may take some time)');
+            $this->_numbers = $this->_trac->query("max=0&order=id");
+        }
         log('Found ' . count($this->_numbers) . ' ticket number(s)');
     }
     /**
@@ -98,7 +113,8 @@ final class Migrations implements \Iterator {
         return new TicketMigration(
             $this->_trac,
             $this->_numbers[$this->_position],
-            $this->_github
+            $this->_github,
+            $this->_trac_url
         );
     }
     /**
